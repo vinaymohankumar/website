@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>NavikEye Trajectory Viewer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.1/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.1/dist/leaflet.js"></script>
+  <style>
+    #map {
+      width: 800px;
+      height: 400px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <input type="file" name="files[]" id="file" multiple=""/>
+  <button id="downloadBtn">Download KML</button>
+  
+  <script>
+    // Initialize the map
+    var map = L.map('map').setView([13.19864, 77.70659], 5);
+
+    // Load a tile layer (use HTTPS to avoid mixed content issues)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: 'Tiles by OpenStreetMap',
+      maxZoom: 19,
+      minZoom: 1
+    }).addTo(map);
+
+    // Store the coordinates
+    var routeCoordinates = [];
+
+    // Handle file input change event
+    document.getElementById('file').onchange = function() {
+      var file = this.files[0];
+      if (file) {
+        var reader = new FileReader();
+
+        // Clear existing markers and polylines
+        clearMapLayers();
+        routeCoordinates = []; // Reset route coordinates
+
+        reader.onload = function(e) {
+          var kmlText = e.target.result;
+          var parser = new DOMParser();
+          var xmlDoc = parser.parseFromString(kmlText, 'application/xml');
+          var coordinates = extractCoordinates(xmlDoc);
+          
+          // Adjust the map view to fit the first coordinate
+          if (coordinates.length > 0) {
+            map.setView(coordinates[0], 8); // Center the map at the first point with zoom level 8
+          }
+
+          // Add coordinates to the map
+          addCoordinatesToMap(coordinates);
+        };
+
+        reader.readAsText(file);
+      }
+    };
+
+    // Extract coordinates from KML XML
+    function extractCoordinates(xmlDoc) {
+      var coordinates = [];
+      var coordinateElements = xmlDoc.getElementsByTagName('coordinates');
+      for (var i = 0; i < coordinateElements.length; i++) {
+        var coordText = coordinateElements[i].textContent.trim();
+        var coordArray = coordText.split(/\s+/);
+
+        coordArray.forEach(function(coord) {
+          if (coord) {
+            var parts = coord.split(',');
+            var lon = parseFloat(parts[0]);
+            var lat = parseFloat(parts[1]);
+            coordinates.push([lat, lon]);
+          }
+        });
+      }
+      return coordinates;
+    }
+
+    // Clear existing markers and polylines from the map
+    function clearMapLayers() {
+      map.eachLayer(function(layer) {
+        if (layer instanceof L.Marker || layer instanceof L.Polyline) {
+          map.removeLayer(layer);
+        }
+      });
+    }
+
+    // Add coordinates to the map and draw lines between them
+    function addCoordinatesToMap(coordinates) {
+      var previousCoord = null;
+      coordinates.forEach(function(coord, index) {
+        // Add marker
+        L.marker(coord).addTo(map)
+          .bindPopup("Latitude: " + coord[0] + ", Longitude: " + coord[1]);
+        
+        // Draw a line from the previous coordinate to the current one
+        if (previousCoord) {
+          L.polyline([previousCoord, coord], { color: 'red' }).addTo(map);
+        }
+
+        // Update the previous coordinate
+        previousCoord = coord;
+      });
+    }
+
+    // Function to create and download KML from the plotted route coordinates
+    document.getElementById('downloadBtn').addEventListener('click', function() {
+      if (routeCoordinates.length === 0) {
+        alert("No route to download.");
+        return;
+      }
+
+      var kmlHeader = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Directions from Source to Destination</name>
+    <Placemark>
+      <name>Route</name>
+      <LineString>
+        <tessellate>1</tessellate>
+        <coordinates>`;
+
+      // Convert the routeCoordinates into the correct KML format
+      var kmlCoordinates = routeCoordinates.map(function(coord) {
+        return `${coord[1]},${coord[0]},0`;
+      }).join("\n");
+
+      var kmlFooter = `</coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>`;
+
+      // Combine KML data
+      var kmlData = kmlHeader + kmlCoordinates + kmlFooter;
+
+      // Create a Blob and trigger download
+      var blob = new Blob([kmlData], { type: 'application/vnd.google-earth.kml+xml' });
+      var link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'route.kml';
+      link.click();
+    });
+  </script>
+</body>
+</html>
